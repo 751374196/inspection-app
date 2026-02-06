@@ -139,9 +139,21 @@ jobs:
     
     - name: Display Buildozer version
       run: buildozer --version
+
+    # ✅ 新增关键步骤：验证Git安装并强制注入环境变量（解决Git not found）
+    - name: Verify Git and fix PATH
+      run: |
+        # 验证git是否真的安装，输出实际路径
+        which git
+        git --version
+        # 把git路径强制加入GITHUB_PATH，让所有后续步骤继承
+        echo "$(dirname $(which git))" >> $GITHUB_PATH
+        echo "✅ Git路径已强制注入，Buildozer可识别"
     
     - name: Build Android APK
       run: |
+        # 构建前再确认git，兜底保障
+        git --version
         buildozer --yes android release -vv
       env:
         ANDROID_HOME: /home/runner/.buildozer/android/platform/android-sdk
@@ -149,7 +161,8 @@ jobs:
         ANDROID_NDK_ROOT: /home/runner/.buildozer/android/platform/android-ndk-r25b
         PYTHONUNBUFFERED: 1
         TERM: dumb
-        PATH: /home/runner/.buildozer/android/platform/android-sdk/tools/bin:/home/runner/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:$PATH
+        # ✅ 兜底：把git默认路径直接加入环境变量
+        PATH: /usr/bin:$SDK_ROOT/tools/bin:$SDK_ROOT/cmdline-tools/latest/bin:$PATH
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
