@@ -34,6 +34,9 @@ log_level = 2
 
 [android]
 
+# Python version for Android (3.10 for pyjnius compatibility)
+android.python_version = 3.10
+
 # Disable Cython deprecation warnings
 android.gradle_dependencies =
     com.github.cython:cython-android:0.3.0
