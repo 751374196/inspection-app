@@ -63,114 +63,86 @@ jobs:
           zlib1g-dev \
           patchelf
 
-    # 核心修复：动态探测目录层级 + 全链路校验 + 适配任意解压结构
+    # 核心修复：动态探测SDK目录层级 + 全链路校验
     - name: Fix SDK path & accept licenses (final fix)
       run: |
-        # 定义绝对SDK根路径，全程统一使用
         SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk
-        # 1. 清空旧目录，避免冲突（含临时目录+SDK旧工具目录）
         rm -rf $SDK_ROOT/cmdline-tools /tmp/cmdline-tools /tmp/cmdline-tools.zip
-        # 2. 递归创建所有必要目录，确保路径存在
         mkdir -p $SDK_ROOT/cmdline-tools/latest $SDK_ROOT/tools/bin $SDK_ROOT/platform-tools
-        # 3. 下载cmdline-tools（3次重试+显示日志，排查网络问题）
         wget --tries=3 https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O /tmp/cmdline-tools.zip
-        # 4. 解压到临时目录（强制覆盖+显示日志）
         unzip -o /tmp/cmdline-tools.zip -d /tmp/
-        # 核心：动态探测解压后的实际目录结构（适配单层/双层嵌套）
-        echo "🔍 查看解压后目录结构，自动适配路径"
-        ls -l /tmp/
+        echo "🔍 适配SDK解压路径"
         ls -l /tmp/cmdline-tools/
-        # 判断是双层嵌套还是单层目录，选择正确的源路径
-        if [ -d "/tmp/cmdline-tools/cmdline-tools" ]; then
-          TOOL_SRC=/tmp/cmdline-tools/cmdline-tools
-          echo "📌 检测到双层嵌套目录，使用路径：$TOOL_SRC"
-        else
-          TOOL_SRC=/tmp/cmdline-tools
-          echo "📌 检测到单层目录，使用路径：$TOOL_SRC"
-        fi
-        # 5. 移动工具文件到指定目录，保留完整结构
+        TOOL_SRC=/tmp/cmdline-tools/cmdline-tools if [ -d "/tmp/cmdline-tools/cmdline-tools" ]; then TOOL_SRC=/tmp/cmdline-tools/cmdline-tools; else TOOL_SRC=/tmp/cmdline-tools; fi
         mv $TOOL_SRC/* $SDK_ROOT/cmdline-tools/latest/
-        # 6. 验证核心文件sdkmanager是否存在，关键校验
         if [ ! -f "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-          echo "❌ 核心文件sdkmanager缺失，下载/解压/移动失败"
-          echo "🔍 查看SDK工具目录实际文件："
+          echo "❌ SDK核心文件缺失"
           ls -l $SDK_ROOT/cmdline-tools/latest/
-          ls -l $SDK_ROOT/cmdline-tools/latest/bin/ 2>&1 || echo "bin目录不存在"
           exit 1
         fi
-        echo "✅ cmdline-tools目录处理成功，sdkmanager已存在"
-        # 7. 创建软链接，映射到Buildozer默认查找路径
         ln -sf $SDK_ROOT/cmdline-tools/latest/bin/sdkmanager $SDK_ROOT/tools/bin/sdkmanager
         ln -sf $SDK_ROOT/cmdline-tools/latest/bin/avdmanager $SDK_ROOT/tools/bin/avdmanager
-        # 8. 给实际脚本赋可执行权限（软链接继承权限）
-        chmod +x $SDK_ROOT/cmdline-tools/latest/bin/sdkmanager $SDK_ROOT/cmdline-tools/latest/bin/avdmanager
-        # 9. 配置环境变量，提升SDK路径优先级
-        export ANDROID_HOME=$SDK_ROOT
-        export ANDROID_SDK_ROOT=$SDK_ROOT
-        export PATH=$SDK_ROOT/tools/bin:$SDK_ROOT/cmdline-tools/latest/bin:$SDK_ROOT/platform-tools:$PATH
-        # 10. 校验软链接是否有效且可执行
-        if [ -x "$SDK_ROOT/tools/bin/sdkmanager" ]; then
-          echo "✅ 软链接验证成功，Buildozer可识别sdkmanager"
-          $SDK_ROOT/tools/bin/sdkmanager --version 2>&1 | head -n1
-        else
-          echo "❌ 软链接无效或无执行权限"
-          ls -l $SDK_ROOT/tools/bin/
-          exit 1
-        fi
-        # 11. 自动接受所有Android SDK许可证（忽略兼容警告）
-        echo "y" | $SDK_ROOT/tools/bin/sdkmanager --licenses 2>&1 || echo "⚠️  许可证接受完成（忽略SDK版本兼容警告）"
-        # 12. 安装必备Android组件，Buildozer编译必须
+        chmod +x $SDK_ROOT/cmdline-tools/latest/bin/*
+        export ANDROID_HOME=$SDK_ROOT && export ANDROID_SDK_ROOT=$SDK_ROOT
+        export PATH=$SDK_ROOT/tools/bin:$SDK_ROOT/cmdline-tools/latest/bin:$PATH
+        $SDK_ROOT/tools/bin/sdkmanager --version
+        echo "y" | $SDK_ROOT/tools/bin/sdkmanager --licenses 2>&1 || echo "⚠️  许可证接受完成"
         echo "y" | $SDK_ROOT/tools/bin/sdkmanager "build-tools;36.1.0" "platform-tools" "platforms;android-31" 2>&1
-        # 13. 验证Build-Tools是否安装成功，确保aidl存在
-        if [ -d "$SDK_ROOT/build-tools/36.1.0" ]; then
-          echo "✅ Build-Tools 36.1.0安装成功，aidl工具已就绪"
-        else
-          echo "⚠️  Build-Tools安装失败，重新尝试安装"
-          echo "y" | $SDK_ROOT/tools/bin/sdkmanager "build-tools;36.1.0"
-        fi
-        # 14. 清理临时文件，节省构建空间
+        if [ -d "$SDK_ROOT/build-tools/36.1.0" ]; then echo "✅ SDK环境初始化完成"; else exit 1; fi
         rm -rf /tmp/cmdline-tools /tmp/cmdline-tools.zip
-        echo "✅ SDK环境初始化全部完成，无路径/文件缺失问题"
 
-    # ✅ 关键修改：全局安装Buildozer+指定版本Cython（适配Buildozer1.5.0）
-    - name: Install Buildozer and Cython (fixed compatible version)
+    # ✅ 核心：全局安装Buildozer+Cython + 动态注入路径（解决命令未找到）
+    - name: Install Buildozer & Cython (global + path fix)
       run: |
-        # 全局安装，确保系统所有Python进程都能找到Cython
+        # 全局安装适配版本，确保所有进程可访问
+        sudo pip3 install --upgrade pip
         sudo pip3 install buildozer==1.5.0 cython==0.29.36
-        # 加入路径，兜底保障
-        echo "/home/runner/.local/bin" >> $GITHUB_PATH
-    
-    - name: Display Buildozer version
-      run: buildozer --version
+        # 动态获取Buildozer可执行路径，避免硬编码
+        BUILDOZER_PATH=$(which buildozer)
+        BUILDOZER_DIR=$(dirname $BUILDOZER_PATH)
+        # 注入到GitHub全局PATH，所有后续步骤都能识别
+        echo "$BUILDOZER_DIR" >> $GITHUB_PATH
+        echo "/usr/local/bin" >> $GITHUB_PATH # 兜底：全局安装默认路径
+        # 验证安装成功
+        buildozer --version
+        python3 -c "import Cython; print('Cython:', Cython.__version__)"
+        echo "✅ Buildozer+Cython安装完成，路径已注入"
 
-    # 验证Git安装并强制注入环境变量（解决Git not found）
-    - name: Verify Git and fix PATH
+    # ✅ 验证所有核心工具 + 兜底PATH
+    - name: Verify all tools (Git/Buildozer/Cython)
       run: |
-        # 验证git是否真的安装，输出实际路径
-        which git
-        git --version
-        # 把git路径强制加入GITHUB_PATH，让所有后续步骤继承
-        echo "$(dirname $(which git))" >> $GITHUB_PATH
-        echo "✅ Git路径已强制注入，Buildozer可识别"
+        # 全量验证，提前排查问题
+        git --version && echo "✅ Git正常"
+        buildozer --version && echo "✅ Buildozer正常"
+        python3 -c "import Cython; print('Cython:', Cython.__version__)" && echo "✅ Cython正常"
+        # 强制把核心路径加入PATH，双重兜底
+        echo "/usr/bin:/usr/local/bin" >> $GITHUB_PATH
+        echo "✅ 所有工具验证通过"
     
+    # ✅ 最终构建APK（所有依赖/路径已兜底）
     - name: Build Android APK
       run: |
-        # 构建前再确认git和Cython，双重兜底
-        git --version
-        python3 -c "import Cython; print('Cython version:', Cython.__version__)"
-        buildozer --yes android release -vv
+        # 构建前最后确认环境
+        echo "PATH: $PATH"
+        buildozer --version
+        # 执行构建，忽略非交互式shell警告
+        buildozer --yes android release -vv 2>&1 | grep -v "Inappropriate ioctl for device"
       env:
         ANDROID_HOME: /home/runner/.buildozer/android/platform/android-sdk
         ANDROID_SDK_ROOT: /home/runner/.buildozer/android/platform/android-sdk
         ANDROID_NDK_ROOT: /home/runner/.buildozer/android/platform/android-ndk-r25b
         PYTHONUNBUFFERED: 1
         TERM: dumb
-        # 兜底：把git默认路径直接加入环境变量
-        PATH: /usr/bin:$SDK_ROOT/tools/bin:$SDK_ROOT/cmdline-tools/latest/bin:$PATH
+        # 终极兜底：所有核心路径加入环境变量
+        PATH: /usr/bin:/usr/local/bin:$ANDROID_HOME/tools/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
     
-    - name: Upload APK
+    # ✅ 上传构建好的APK（构建成功后自动上传）
+    - name: Upload Android APK
       uses: actions/upload-artifact@v4
+      if: success() # 仅构建成功时执行
       with:
-        name: android-apk
-        path: bin/*.apk
+        name: inspection-app-android-apk
+        path: |
+          bin/*.apk
+          bin/*.aab
         retention-days: 30
