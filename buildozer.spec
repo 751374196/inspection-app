@@ -44,8 +44,9 @@ android.gradle_dependencies =
     com.github.cython:cython-android:0.3.0
 require = python3,kivy,pyjnius,kivyandroid,pygments,pytesseract,pillow,opencv-python-headless,pyodbc,pymysql,reportlab,beautifulsoup4,lxml,numpy
 
+[android.p4a]
 # Python version for Android (3.10 for pyjnius compatibility)
-p4a.python_version = 3.10
+python_version = 3.10
 
 android.permissions = CAMERA, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, INTERNET
 
