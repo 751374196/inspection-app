@@ -34,6 +34,11 @@ log_level = 2
 
 [android]
 
+# Force clean build and download all dependencies
+android.clean_build = True
+android.skip_update = False
+android.accept_sdk_license = True
+
 # Python version for Android (3.10 for pyjnius compatibility)
 android.python_version = 3.10
 
