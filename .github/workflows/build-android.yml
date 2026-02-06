@@ -132,15 +132,18 @@ jobs:
         rm -rf /tmp/cmdline-tools /tmp/cmdline-tools.zip
         echo "✅ SDK环境初始化全部完成，无路径/文件缺失问题"
 
-    - name: Install Buildozer (fixed compatible version)
+    # ✅ 关键修改：全局安装Buildozer+指定版本Cython（适配Buildozer1.5.0）
+    - name: Install Buildozer and Cython (fixed compatible version)
       run: |
-        pip3 install --user buildozer==1.5.0 cython==0.29.36
+        # 全局安装，确保系统所有Python进程都能找到Cython
+        sudo pip3 install buildozer==1.5.0 cython==0.29.36
+        # 加入路径，兜底保障
         echo "/home/runner/.local/bin" >> $GITHUB_PATH
     
     - name: Display Buildozer version
       run: buildozer --version
 
-    # ✅ 新增关键步骤：验证Git安装并强制注入环境变量（解决Git not found）
+    # 验证Git安装并强制注入环境变量（解决Git not found）
     - name: Verify Git and fix PATH
       run: |
         # 验证git是否真的安装，输出实际路径
@@ -152,8 +155,9 @@ jobs:
     
     - name: Build Android APK
       run: |
-        # 构建前再确认git，兜底保障
+        # 构建前再确认git和Cython，双重兜底
         git --version
+        python3 -c "import Cython; print('Cython version:', Cython.__version__)"
         buildozer --yes android release -vv
       env:
         ANDROID_HOME: /home/runner/.buildozer/android/platform/android-sdk
@@ -161,7 +165,7 @@ jobs:
         ANDROID_NDK_ROOT: /home/runner/.buildozer/android/platform/android-ndk-r25b
         PYTHONUNBUFFERED: 1
         TERM: dumb
-        # ✅ 兜底：把git默认路径直接加入环境变量
+        # 兜底：把git默认路径直接加入环境变量
         PATH: /usr/bin:$SDK_ROOT/tools/bin:$SDK_ROOT/cmdline-tools/latest/bin:$PATH
     
     - name: Upload APK
