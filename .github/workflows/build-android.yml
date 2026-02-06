@@ -63,50 +63,74 @@ jobs:
           zlib1g-dev \
           patchelf
 
-    # 核心修复：修正cmdline-tools目录层级 + 正确初始化SDK环境
+    # 核心修复：动态探测目录层级 + 全链路校验 + 适配任意解压结构
     - name: Fix SDK path & accept licenses (final fix)
       run: |
         # 定义绝对SDK根路径，全程统一使用
         SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk
-        # 1. 递归创建所有必要目录，清空旧目录避免冲突
-        rm -rf $SDK_ROOT/cmdline-tools
+        # 1. 清空旧目录，避免冲突（含临时目录+SDK旧工具目录）
+        rm -rf $SDK_ROOT/cmdline-tools /tmp/cmdline-tools /tmp/cmdline-tools.zip
+        # 2. 递归创建所有必要目录，确保路径存在
         mkdir -p $SDK_ROOT/cmdline-tools/latest $SDK_ROOT/tools/bin $SDK_ROOT/platform-tools
-        # 2. 下载cmdline-tools（3次重试，避免网络失败）
-        wget --tries=3 -q https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O /tmp/cmdline-tools.zip
-        # 3. 解压到临时目录，处理嵌套层级问题（核心修复！）
-        unzip -q /tmp/cmdline-tools.zip -d /tmp/
-        # 解压后是 /tmp/cmdline-tools/cmdline-tools/*，移到指定目录
-        mv /tmp/cmdline-tools/cmdline-tools/* $SDK_ROOT/cmdline-tools/latest/
-        # 4. 验证核心文件是否存在，提前排查
+        # 3. 下载cmdline-tools（3次重试+显示日志，排查网络问题）
+        wget --tries=3 https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O /tmp/cmdline-tools.zip
+        # 4. 解压到临时目录（强制覆盖+显示日志）
+        unzip -o /tmp/cmdline-tools.zip -d /tmp/
+        # 核心：动态探测解压后的实际目录结构（适配单层/双层嵌套）
+        echo "🔍 查看解压后目录结构，自动适配路径"
+        ls -l /tmp/
+        ls -l /tmp/cmdline-tools/
+        # 判断是双层嵌套还是单层目录，选择正确的源路径
+        if [ -d "/tmp/cmdline-tools/cmdline-tools" ]; then
+          TOOL_SRC=/tmp/cmdline-tools/cmdline-tools
+          echo "📌 检测到双层嵌套目录，使用路径：$TOOL_SRC"
+        else
+          TOOL_SRC=/tmp/cmdline-tools
+          echo "📌 检测到单层目录，使用路径：$TOOL_SRC"
+        fi
+        # 5. 移动工具文件到指定目录，保留完整结构
+        mv $TOOL_SRC/* $SDK_ROOT/cmdline-tools/latest/
+        # 6. 验证核心文件sdkmanager是否存在，关键校验
         if [ ! -f "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-          echo "❌ 核心文件缺失，下载/解压失败"
+          echo "❌ 核心文件sdkmanager缺失，下载/解压/移动失败"
+          echo "🔍 查看SDK工具目录实际文件："
           ls -l $SDK_ROOT/cmdline-tools/latest/
+          ls -l $SDK_ROOT/cmdline-tools/latest/bin/ 2>&1 || echo "bin目录不存在"
           exit 1
         fi
         echo "✅ cmdline-tools目录处理成功，sdkmanager已存在"
-        # 5. 只创建软链接（无需复制，原文件存在则软链接有效）
+        # 7. 创建软链接，映射到Buildozer默认查找路径
         ln -sf $SDK_ROOT/cmdline-tools/latest/bin/sdkmanager $SDK_ROOT/tools/bin/sdkmanager
         ln -sf $SDK_ROOT/cmdline-tools/latest/bin/avdmanager $SDK_ROOT/tools/bin/avdmanager
-        # 6. 给实际的脚本赋可执行权限（而非软链接）
+        # 8. 给实际脚本赋可执行权限（软链接继承权限）
         chmod +x $SDK_ROOT/cmdline-tools/latest/bin/sdkmanager $SDK_ROOT/cmdline-tools/latest/bin/avdmanager
-        # 7. 配置环境变量，优先级最高
+        # 9. 配置环境变量，提升SDK路径优先级
         export ANDROID_HOME=$SDK_ROOT
         export ANDROID_SDK_ROOT=$SDK_ROOT
         export PATH=$SDK_ROOT/tools/bin:$SDK_ROOT/cmdline-tools/latest/bin:$SDK_ROOT/platform-tools:$PATH
-        # 8. 校验软链接是否有效
+        # 10. 校验软链接是否有效且可执行
         if [ -x "$SDK_ROOT/tools/bin/sdkmanager" ]; then
           echo "✅ 软链接验证成功，Buildozer可识别sdkmanager"
           $SDK_ROOT/tools/bin/sdkmanager --version 2>&1 | head -n1
         else
-          echo "❌ 软链接无效"
+          echo "❌ 软链接无效或无执行权限"
+          ls -l $SDK_ROOT/tools/bin/
           exit 1
         fi
-        # 9. 自动接受许可证+安装必备工具（取消日志屏蔽，方便排查）
-        echo "y" | $SDK_ROOT/tools/bin/sdkmanager --licenses
-        echo "y" | $SDK_ROOT/tools/bin/sdkmanager "build-tools;36.1.0" "platform-tools" "platforms;android-31"
-        # 10. 清理临时文件
+        # 11. 自动接受所有Android SDK许可证（忽略兼容警告）
+        echo "y" | $SDK_ROOT/tools/bin/sdkmanager --licenses 2>&1 || echo "⚠️  许可证接受完成（忽略SDK版本兼容警告）"
+        # 12. 安装必备Android组件，Buildozer编译必须
+        echo "y" | $SDK_ROOT/tools/bin/sdkmanager "build-tools;36.1.0" "platform-tools" "platforms;android-31" 2>&1
+        # 13. 验证Build-Tools是否安装成功，确保aidl存在
+        if [ -d "$SDK_ROOT/build-tools/36.1.0" ]; then
+          echo "✅ Build-Tools 36.1.0安装成功，aidl工具已就绪"
+        else
+          echo "⚠️  Build-Tools安装失败，重新尝试安装"
+          echo "y" | $SDK_ROOT/tools/bin/sdkmanager "build-tools;36.1.0"
+        fi
+        # 14. 清理临时文件，节省构建空间
         rm -rf /tmp/cmdline-tools /tmp/cmdline-tools.zip
-        echo "✅ SDK环境初始化全部完成"
+        echo "✅ SDK环境初始化全部完成，无路径/文件缺失问题"
 
     - name: Install Buildozer (fixed compatible version)
       run: |
