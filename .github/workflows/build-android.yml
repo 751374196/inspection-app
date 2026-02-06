@@ -10,7 +10,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+    # 关键：配置虚拟终端为伪交互模式，解决stty报错
+    defaults:
+      run:
+        shell: bash -l {0}
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -19,6 +23,8 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
+        # 关键：缓存Python依赖，加速构建
+        cache: 'pip'
     
     - name: Verify Python version
       run: |
@@ -58,21 +64,25 @@ jobs:
           libltdl-dev \
           zlib1g-dev \
           patchelf
-    
-    - name: Install Buildozer
+    # 关键修复1：固定兼容Python3.10的Buildozer/Cython版本，避开高版本兼容问题
+    - name: Install Buildozer (fixed compatible version)
       run: |
-        pip3 install --user buildozer cython
+        pip3 install --user buildozer==1.5.0 cython==0.29.36
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     
     - name: Display Buildozer version
       run: buildozer --version
     
+    # 关键修复2：去掉yes |，改用Buildozer原生--yes参数，解决Broken pipe；加-vv看详细日志
     - name: Build Android APK
       run: |
-        yes | buildozer android release
+        buildozer --yes android release -vv
       env:
         ANDROID_SDK_ROOT: $HOME/.buildozer/android/platform/android-sdk
         ANDROID_NDK_ROOT: $HOME/.buildozer/android/platform/android-ndk-r25b
+        # 关键：禁用stty终端检查，解决ioctl报错
+        PYTHONUNBUFFERED: 1
+        TERM: dumb
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
