@@ -1,0 +1,32 @@
+{
+  "sql_server": {
+    "host": "zjzx.cpicfiber.com",
+    "port": 1433,
+    "database": "CPIC_QMI",
+    "username": "sa",
+    "password": "Cpic1234$",
+    "db_type": "sql_server"
+  },
+  "mysql_server": {
+    "host": "10.12.0.130",
+    "port": 9030,
+    "database": "cpic_doris",
+    "username": "root",
+    "password": "root",
+    "db_type": "mysql"
+  },
+  "admin": {
+    "username": "CPIC",
+    "password": "CPIC"
+  },
+  "ocr": {
+    "engine": "pytesseract",
+    "language": "eng+chi_sim",
+    "image_quality": "high"
+  },
+  "upload": {
+    "auto_upload": true,
+    "retry_count": 3,
+    "timeout": 30
+  }
+}

@@ -1,0 +1,82 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: Verify Python version
+      run: |
+        python3 --version
+        which python3
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          git \
+          ffmpeg \
+          libsdl2-dev \
+          libsdl2-image-dev \
+          libsdl2-mixer-dev \
+          libsdl2-ttf-dev \
+          libportmidi-dev \
+          libswscale-dev \
+          libavformat-dev \
+          libavcodec-dev \
+          zlib1g-dev \
+          libgstreamer1.0-dev \
+          gstreamer1.0-plugins-base \
+          gstreamer1.0-plugins-good \
+          autoconf \
+          automake \
+          libtool \
+          pkg-config \
+          libncurses-dev \
+          cmake \
+          libffi-dev \
+          libssl-dev \
+          openjdk-17-jdk \
+          zip \
+          unzip \
+          libltdl-dev \
+          zlib1g-dev \
+          patchelf
+    
+    - name: Install Buildozer
+      run: |
+        pip3 install --user buildozer cython
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+    
+    - name: Display Buildozer version
+      run: buildozer --version
+    
+    - name: Build Android APK
+      run: |
+        yes | buildozer android release
+      env:
+        ANDROID_SDK_ROOT: $HOME/.buildozer/android/platform/android-sdk
+        ANDROID_NDK_ROOT: $HOME/.buildozer/android/platform/android-ndk-r25b
+    
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: android-apk
+        path: bin/*.apk
+        retention-days: 30

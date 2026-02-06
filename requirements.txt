@@ -1,0 +1,8 @@
+kivy
+pytesseract
+Pillow
+opencv-python
+numpy
+requests
+pyodbc
+pymysql
