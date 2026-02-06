@@ -63,44 +63,50 @@ jobs:
           zlib1g-dev \
           patchelf
 
-    # 终极修复：双兜底适配sdkmanager路径 + 强制校验 + 提前初始化SDK
-    - name: Fix SDK path & accept licenses (final version)
+    # 核心修复：修正cmdline-tools目录层级 + 正确初始化SDK环境
+    - name: Fix SDK path & accept licenses (final fix)
       run: |
-        # 定义SDK根路径（全程用绝对路径，避免拼接错误）
+        # 定义绝对SDK根路径，全程统一使用
         SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk
-        # 1. 强制创建所有目录（含Buildozer硬编码的旧路径，递归创建确保无遗漏）
-        mkdir -p $SDK_ROOT/cmdline-tools/latest/bin $SDK_ROOT/tools/bin $SDK_ROOT/platform-tools
-        # 2. 下载新版cmdline-tools（带重试，避免网络下载失败）
+        # 1. 递归创建所有必要目录，清空旧目录避免冲突
+        rm -rf $SDK_ROOT/cmdline-tools
+        mkdir -p $SDK_ROOT/cmdline-tools/latest $SDK_ROOT/tools/bin $SDK_ROOT/platform-tools
+        # 2. 下载cmdline-tools（3次重试，避免网络失败）
         wget --tries=3 -q https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O /tmp/cmdline-tools.zip
-        # 3. 解压并整理cmdline-tools目录结构
-        unzip -q /tmp/cmdline-tools.zip -d $SDK_ROOT/
-        mv -f $SDK_ROOT/cmdline-tools $SDK_ROOT/cmdline-tools/latest
-        # 4. 双兜底：软链接 + 手动复制sdkmanager脚本（彻底解决识别问题）
+        # 3. 解压到临时目录，处理嵌套层级问题（核心修复！）
+        unzip -q /tmp/cmdline-tools.zip -d /tmp/
+        # 解压后是 /tmp/cmdline-tools/cmdline-tools/*，移到指定目录
+        mv /tmp/cmdline-tools/cmdline-tools/* $SDK_ROOT/cmdline-tools/latest/
+        # 4. 验证核心文件是否存在，提前排查
+        if [ ! -f "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+          echo "❌ 核心文件缺失，下载/解压失败"
+          ls -l $SDK_ROOT/cmdline-tools/latest/
+          exit 1
+        fi
+        echo "✅ cmdline-tools目录处理成功，sdkmanager已存在"
+        # 5. 只创建软链接（无需复制，原文件存在则软链接有效）
         ln -sf $SDK_ROOT/cmdline-tools/latest/bin/sdkmanager $SDK_ROOT/tools/bin/sdkmanager
         ln -sf $SDK_ROOT/cmdline-tools/latest/bin/avdmanager $SDK_ROOT/tools/bin/avdmanager
-        cp -f $SDK_ROOT/cmdline-tools/latest/bin/sdkmanager $SDK_ROOT/tools/bin/
-        cp -f $SDK_ROOT/cmdline-tools/latest/bin/avdmanager $SDK_ROOT/tools/bin/
-        # 5. 给脚本添加可执行权限（关键！避免Buildozer执行时权限不足）
-        chmod +x $SDK_ROOT/tools/bin/sdkmanager $SDK_ROOT/tools/bin/avdmanager
-        # 6. 配置环境变量（双路径加入，优先级最高）
+        # 6. 给实际的脚本赋可执行权限（而非软链接）
+        chmod +x $SDK_ROOT/cmdline-tools/latest/bin/sdkmanager $SDK_ROOT/cmdline-tools/latest/bin/avdmanager
+        # 7. 配置环境变量，优先级最高
         export ANDROID_HOME=$SDK_ROOT
         export ANDROID_SDK_ROOT=$SDK_ROOT
         export PATH=$SDK_ROOT/tools/bin:$SDK_ROOT/cmdline-tools/latest/bin:$SDK_ROOT/platform-tools:$PATH
-        # 7. 强制校验sdkmanager是否存在且可执行（日志输出结果，方便排查）
+        # 8. 校验软链接是否有效
         if [ -x "$SDK_ROOT/tools/bin/sdkmanager" ]; then
-          echo "✅ sdkmanager验证成功：路径存在+可执行"
-          $SDK_ROOT/tools/bin/sdkmanager --version || echo "⚠️  sdkmanager版本查询成功，忽略兼容警告"
+          echo "✅ 软链接验证成功，Buildozer可识别sdkmanager"
+          $SDK_ROOT/tools/bin/sdkmanager --version 2>&1 | head -n1
         else
-          echo "❌ sdkmanager验证失败，立即退出"
+          echo "❌ 软链接无效"
           exit 1
         fi
-        # 8. 自动接受所有许可证 + 安装必备工具（带强制刷新）
-        echo "y" | $SDK_ROOT/tools/bin/sdkmanager --licenses --verbose > /dev/null 2>&1
-        echo "y" | $SDK_ROOT/tools/bin/sdkmanager --update > /dev/null 2>&1
-        echo "y" | $SDK_ROOT/tools/bin/sdkmanager "build-tools;36.1.0" "platform-tools" "tools" "platforms;android-31" > /dev/null 2>&1
-        # 9. 清理临时文件
-        rm -f /tmp/cmdline-tools.zip
-        echo "✅ SDK环境初始化完成，Buildozer可正常识别sdkmanager"
+        # 9. 自动接受许可证+安装必备工具（取消日志屏蔽，方便排查）
+        echo "y" | $SDK_ROOT/tools/bin/sdkmanager --licenses
+        echo "y" | $SDK_ROOT/tools/bin/sdkmanager "build-tools;36.1.0" "platform-tools" "platforms;android-31"
+        # 10. 清理临时文件
+        rm -rf /tmp/cmdline-tools /tmp/cmdline-tools.zip
+        echo "✅ SDK环境初始化全部完成"
 
     - name: Install Buildozer (fixed compatible version)
       run: |
@@ -110,22 +116,10 @@ jobs:
     - name: Display Buildozer version
       run: buildozer --version
     
-    # 构建前再校验一次sdkmanager（双重保障）
-    - name: Final check sdkmanager before build
-      run: |
-        SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk
-        if [ -x "$SDK_ROOT/tools/bin/sdkmanager" ]; then
-          echo "✅ 构建前校验：sdkmanager正常可用"
-        else
-          echo "❌ 构建前校验失败，sdkmanager不可用"
-          exit 1
-        fi
-    
     - name: Build Android APK
       run: |
         buildozer --yes android release -vv
       env:
-        # 强制指定环境变量，覆盖Buildozer的自动检测
         ANDROID_HOME: /home/runner/.buildozer/android/platform/android-sdk
         ANDROID_SDK_ROOT: /home/runner/.buildozer/android/platform/android-sdk
         ANDROID_NDK_ROOT: /home/runner/.buildozer/android/platform/android-ndk-r25b
