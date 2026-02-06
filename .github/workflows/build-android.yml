@@ -10,7 +10,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 关键：配置虚拟终端为伪交互模式，解决stty报错
     defaults:
       run:
         shell: bash -l {0}
@@ -23,7 +22,6 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
-        # 关键：缓存Python依赖，加速构建
         cache: 'pip'
     
     - name: Verify Python version
@@ -65,34 +63,33 @@ jobs:
           zlib1g-dev \
           patchelf
 
-    # 核心新增：自动接受Android SDK许可证 + 安装Build-Tools 36.1.0 + 验证aidl
-    - name: Accept Android SDK licenses and install build-tools
+    # 核心修复：接受许可证+安装Build-Tools+【软链接适配Buildozer默认路径】
+    - name: Accept Android SDK licenses and fix sdkmanager path
       run: |
-        # 创建Buildozer默认SDK目录，避免路径不存在
-        mkdir -p $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin
-        # 静默下载Android命令行工具（含sdkmanager），屏蔽冗余日志
+        # 1. 创建所有必要目录（含Buildozer默认找的tools/bin）
+        SDK_PATH=$HOME/.buildozer/android/platform/android-sdk
+        mkdir -p $SDK_PATH/cmdline-tools/latest/bin $SDK_PATH/tools/bin
+        # 2. 下载并解压新版cmdline-tools（含sdkmanager）
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O cmdline-tools.zip
-        # 静默解压，适配Buildozer的cmdline-tools目录结构
-        unzip -q cmdline-tools.zip -d $HOME/.buildozer/android/platform/android-sdk/
-        mv $HOME/.buildozer/android/platform/android-sdk/cmdline-tools $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest
-        # 配置环境变量，让系统找到sdkmanager命令
-        export PATH=$HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:$PATH
-        export ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk
-        # 自动接受所有Android SDK许可证（核心解决许可未接受报错）
+        unzip -q cmdline-tools.zip -d $SDK_PATH/
+        mv $SDK_PATH/cmdline-tools $SDK_PATH/cmdline-tools/latest
+        # 3. 关键：创建软链接，让Buildozer在默认路径找到sdkmanager
+        ln -s $SDK_PATH/cmdline-tools/latest/bin/sdkmanager $SDK_PATH/tools/bin/sdkmanager
+        ln -s $SDK_PATH/cmdline-tools/latest/bin/avdmanager $SDK_PATH/tools/bin/avdmanager
+        # 4. 配置环境变量
+        export PATH=$SDK_PATH/cmdline-tools/latest/bin:$SDK_PATH/tools/bin:$PATH
+        export ANDROID_HOME=$SDK_PATH
+        # 5. 自动接受许可证+安装依赖工具
         echo "y" | sdkmanager --licenses > /dev/null 2>&1
-        # 安装Build-Tools 36.1.0+平台工具，确保aidl存在
-        echo "y" | sdkmanager "build-tools;36.1.0" "platform-tools" "tools" > /dev/null 2>&1
-        # 验证aidl安装结果，日志输出成功提示
-        if [ -f "$HOME/.buildozer/android/platform/android-sdk/build-tools/36.1.0/aidl" ]; then
-          echo "✅ Aidl工具和Build-Tools 36.1.0安装成功"
-        else
-          echo "⚠️  重新尝试安装Build-Tools"
-          echo "y" | sdkmanager "build-tools;36.1.0"
+        echo "y" | sdkmanager "build-tools;36.1.0" "platform-tools" "tools" "platforms;android-31" > /dev/null 2>&1
+        # 6. 验证：检查sdkmanager是否能被Buildozer识别
+        if [ -f $SDK_PATH/tools/bin/sdkmanager ]; then
+          echo "✅ sdkmanager路径适配成功，Buildozer可识别"
+          $SDK_PATH/tools/bin/sdkmanager --version
         fi
-        # 清理压缩包，节省空间
+        # 7. 清理文件
         rm -f cmdline-tools.zip
 
-    # 关键修复1：固定兼容Python3.10的Buildozer/Cython版本，避开高版本兼容问题
     - name: Install Buildozer (fixed compatible version)
       run: |
         pip3 install --user buildozer==1.5.0 cython==0.29.36
@@ -101,14 +98,12 @@ jobs:
     - name: Display Buildozer version
       run: buildozer --version
     
-    # 关键修复2：去掉yes |，改用Buildozer原生--yes参数，解决Broken pipe；加-vv看详细日志
     - name: Build Android APK
       run: |
         buildozer --yes android release -vv
       env:
         ANDROID_SDK_ROOT: $HOME/.buildozer/android/platform/android-sdk
         ANDROID_NDK_ROOT: $HOME/.buildozer/android/platform/android-ndk-r25b
-        # 关键：禁用stty终端检查，解决ioctl报错
         PYTHONUNBUFFERED: 1
         TERM: dumb
     
