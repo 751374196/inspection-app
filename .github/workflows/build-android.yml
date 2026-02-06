@@ -64,6 +64,34 @@ jobs:
           libltdl-dev \
           zlib1g-dev \
           patchelf
+
+    # 核心新增：自动接受Android SDK许可证 + 安装Build-Tools 36.1.0 + 验证aidl
+    - name: Accept Android SDK licenses and install build-tools
+      run: |
+        # 创建Buildozer默认SDK目录，避免路径不存在
+        mkdir -p $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin
+        # 静默下载Android命令行工具（含sdkmanager），屏蔽冗余日志
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O cmdline-tools.zip
+        # 静默解压，适配Buildozer的cmdline-tools目录结构
+        unzip -q cmdline-tools.zip -d $HOME/.buildozer/android/platform/android-sdk/
+        mv $HOME/.buildozer/android/platform/android-sdk/cmdline-tools $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest
+        # 配置环境变量，让系统找到sdkmanager命令
+        export PATH=$HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:$PATH
+        export ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk
+        # 自动接受所有Android SDK许可证（核心解决许可未接受报错）
+        echo "y" | sdkmanager --licenses > /dev/null 2>&1
+        # 安装Build-Tools 36.1.0+平台工具，确保aidl存在
+        echo "y" | sdkmanager "build-tools;36.1.0" "platform-tools" "tools" > /dev/null 2>&1
+        # 验证aidl安装结果，日志输出成功提示
+        if [ -f "$HOME/.buildozer/android/platform/android-sdk/build-tools/36.1.0/aidl" ]; then
+          echo "✅ Aidl工具和Build-Tools 36.1.0安装成功"
+        else
+          echo "⚠️  重新尝试安装Build-Tools"
+          echo "y" | sdkmanager "build-tools;36.1.0"
+        fi
+        # 清理压缩包，节省空间
+        rm -f cmdline-tools.zip
+
     # 关键修复1：固定兼容Python3.10的Buildozer/Cython版本，避开高版本兼容问题
     - name: Install Buildozer (fixed compatible version)
       run: |
